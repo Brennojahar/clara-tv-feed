@@ -5,7 +5,7 @@ sinopse e pôster em pt-BR, fundo sem texto, logo do título -> nota do IMDb (da
 
 uso: TMDB_TOKEN=... python3 build_feed.py [saida.json]
 """
-import csv, gzip, io, json, os, sys, time, urllib.parse, urllib.request
+import csv, gzip, io, json, os, re, sys, time, urllib.parse, urllib.request
 from datetime import datetime, timezone
 
 TOKEN = os.environ["TMDB_TOKEN"].strip()
@@ -14,6 +14,12 @@ IMG = "https://image.tmdb.org/t/p/"
 RATINGS = "https://datasets.imdbws.com/title.ratings.tsv.gz"
 MAX_ITEMS = 20
 PAGES = 5
+
+JUSTWATCH = "https://apis.justwatch.com/graphql"
+SYNOPSIS_MAX = 170   # ~3 linhas no bloco da TV
+
+# Nome do serviço no JustWatch para cada app (as variantes "Amazon Channel" abrem no Prime Video, não servem).
+JW_NAMES = {"Netflix": ("Netflix",), "HBO Max": ("HBO Max", "Max"), "Disney+": ("Disney Plus",), "Apple TV": ("Apple TV", "Apple TV Plus")}
 
 # provider_id do TMDB (região BR) -> app da TV. Ordem = preferência quando o título está em mais de um.
 APPS = [
@@ -65,6 +71,65 @@ def best(images, langs):
     return None
 
 
+def short_synopsis(text):
+    """As primeiras frases que cabem em SYNOPSIS_MAX: a premissa, sem reticências nem spoiler do fim."""
+    text = " ".join(text.split())
+    sentences = re.split(r"(?<=[.!?…])\s+", text)
+    out = ""
+    for sent in sentences:
+        if len(out) + len(sent) + 1 > SYNOPSIS_MAX:
+            break
+        out = f"{out} {sent}".strip()
+    if out:
+        return out
+    first = sentences[0]
+    cut = max(first.rfind(", ", 0, SYNOPSIS_MAX), first.rfind("; ", 0, SYNOPSIS_MAX), first.rfind(" e ", 0, SYNOPSIS_MAX))
+    if cut > SYNOPSIS_MAX * 0.5:
+        return first[:cut].rstrip(" ,;") + "."
+    return first[:first.rfind(" ", 0, SYNOPSIS_MAX - 1)].rstrip(" ,;") + "…"
+
+
+def jw_query(query, variables):
+    req = urllib.request.Request(JUSTWATCH, data=json.dumps({"query": query, "variables": variables}).encode(),
+                                 headers={"Content-Type": "application/json", "User-Agent": "clara-tv-feed"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.load(r)
+
+
+JW_SEARCH = """query($q:String!){ popularTitles(country:BR, first:5, filter:{searchQuery:$q}) { edges { node {
+  objectType content(country:BR, language:"pt") { externalIds { tmdbId } }
+  offers(country:BR, platform:WEB) { monetizationType package { clearName } standardWebURL } } } } }"""
+
+
+def clean_url(url):
+    """Link que abre a página do título no app da TV (sem parâmetros de rastreio)."""
+    parts = urllib.parse.urlsplit(url)
+    query = urllib.parse.parse_qs(parts.query)
+    if parts.netloc == "tv.apple.com" and "showId" in query:   # episódio -> página da série
+        return f"https://tv.apple.com/br/show/s/{query['showId'][0]}"
+    return urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+
+
+def deep_link(names, tmdb_id, kind, app):
+    """Link do título dentro do app escolhido, via JustWatch; None quando não achar (a TV abre só o app)."""
+    want = "MOVIE" if kind == "movie" else "SHOW"
+    for name in dict.fromkeys(n for n in names if n):
+        try:
+            edges = jw_query(JW_SEARCH, {"q": name})["data"]["popularTitles"]["edges"]
+        except Exception as e:
+            print(f"  JustWatch falhou para {name}: {e}")
+            return None
+        for e in edges:
+            n = e["node"]
+            if n["objectType"] != want or str((n["content"]["externalIds"] or {}).get("tmdbId")) != str(tmdb_id):
+                continue
+            for o in n["offers"]:
+                if o["monetizationType"] == "FLATRATE" and o["package"]["clearName"] in JW_NAMES[app] and o.get("standardWebURL"):
+                    return clean_url(o["standardWebURL"])
+            return None
+    return None
+
+
 def imdb_ratings(wanted):
     """{tt...: (nota, votos)} só para os ids pedidos, lendo o dataset em streaming."""
     out = {}
@@ -103,7 +168,9 @@ def main():
                 "type": "Filme" if kind == "movie" else "Série",
                 "title": d.get("title") or d.get("name"),
                 "year": date[:4],
-                "overview": overview,
+                "overview": short_synopsis(overview),
+                "link": deep_link([d.get("title") or d.get("name"), d.get("original_title") or d.get("original_name")],
+                                  d["id"], kind, app[0]),
                 "genres": [g["name"] for g in d.get("genres", [])][:2],
                 "poster": IMG + "w342" + poster,
                 "backdrop": IMG + "w1280" + backdrop if backdrop else None,
@@ -129,7 +196,7 @@ def main():
         json.dump(feed, f, ensure_ascii=False, indent=1)
     print(f"{len(picked)} títulos -> {out_path}")
     for p in picked:
-        print(f"  {p['app']:<9} {p['type']:<6} {p['imdb'] or '-':<4} {p['title']}")
+        print(f"  {p['app']:<9} {p['type']:<6} {p['imdb'] or '-':<4} {p['title']}  {'link' if p['link'] else 'SEM LINK'}")
 
 
 if __name__ == "__main__":

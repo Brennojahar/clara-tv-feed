@@ -11,3 +11,7 @@ Precisa do secret `TMDB_TOKEN` (API Read Access Token do TMDB).
 
 Este produto usa a API do TMDB, mas não é endossado nem certificado pelo TMDB.
 Notas do IMDb: dados cedidos por IMDb (https://www.imdb.com), uso pessoal e não comercial.
+
+O link que abre cada título direto no app (Netflix, HBO Max, Disney+, Apple TV) vem da API
+GraphQL pública do JustWatch, que não é oficialmente documentada; se ela mudar, a TV volta a abrir só o app.
+A sinopse é cortada nas primeiras frases (a premissa), para caber sem reticências e sem spoiler.
