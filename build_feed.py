@@ -1,7 +1,7 @@
 """Gera feed.json para o destaque da Clara TV.
 
 Em alta no TMDB (filmes e séries) -> só o que está por assinatura no Brasil nos apps da TV ->
-sinopse em pt-BR, fundo sem texto, logo do título -> nota do IMDb (datasets oficiais, title.ratings).
+sinopse e pôster em pt-BR, fundo sem texto, logo do título -> nota do IMDb (datasets oficiais, title.ratings).
 
 uso: TMDB_TOKEN=... python3 build_feed.py [saida.json]
 """
@@ -84,7 +84,8 @@ def main():
             overview = (d.get("overview") or "").strip()
             imgs = d.get("images", {})
             backdrop = best(imgs.get("backdrops", []), [None, "en", "pt"]) or d.get("backdrop_path")
-            if not app or not overview or not backdrop:
+            poster = best(imgs.get("posters", []), ["pt", "en"]) or d.get("poster_path")
+            if not app or not overview or not poster:
                 continue
             date = d.get("release_date") or d.get("first_air_date") or ""
             logo = best(imgs.get("logos", []), ["pt", "en"])
@@ -95,7 +96,8 @@ def main():
                 "year": date[:4],
                 "overview": overview,
                 "genres": [g["name"] for g in d.get("genres", [])][:2],
-                "backdrop": IMG + "w1280" + backdrop,
+                "poster": IMG + "w342" + poster,
+                "backdrop": IMG + "w1280" + backdrop if backdrop else None,
                 "logo": IMG + "w500" + logo if logo else None,
                 "imdb_id": (d.get("external_ids") or {}).get("imdb_id"),
                 "app": app[0],
