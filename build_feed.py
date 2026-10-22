@@ -24,9 +24,18 @@ APPS = [
 ]
 
 
+# Aceita as duas credenciais do TMDB: o "API Read Access Token" (JWT, vai no header) ou a "API Key" curta (query).
+BEARER = TOKEN.count(".") == 2
+
+
 def get(path, **params):
+    if not BEARER:
+        params["api_key"] = TOKEN
     url = f"{API}{path}?{urllib.parse.urlencode(params)}"
-    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {TOKEN}", "Accept": "application/json"})
+    headers = {"Accept": "application/json"}
+    if BEARER:
+        headers["Authorization"] = f"Bearer {TOKEN}"
+    req = urllib.request.Request(url, headers=headers)
     for attempt in range(4):
         try:
             with urllib.request.urlopen(req, timeout=30) as r:
